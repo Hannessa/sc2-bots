@@ -51,6 +51,10 @@ class BaseBot(sc2.BotAI):
     timer = None
     order_queue = []
 
+    remembered_enemy_units = []
+    remembered_enemy_units_by_tag = {}
+    remembered_friendly_units_by_tag = {}
+
     def reset_timer(self):
         self.timer = time.time()
 
@@ -177,9 +181,33 @@ class BaseBot(sc2.BotAI):
         #self.vespene -= cost.vespene
         #print("Custom do done")
 
+    # Warp-in a unit nearby location from warpgate
+    async def warp_in(self, unit, location, warpgate):
+        if isinstance(location, sc2.unit.Unit):
+            location = location.position.to2
+        elif location is not None:
+            location = location.to2
 
+        x = random.randrange(-8,8)
+        y = random.randrange(-8,8)
+
+        placement = sc2.position.Point2((location.x+x,location.y+y))
+
+        action = warpgate.warp_in(unit, placement)
+        error = await self._client.actions(action, game_data=self._game_data)
+
+        if not error:
+            cost = self._game_data.calculate_ability_cost(action.ability)
+            self.minerals -= cost.minerals
+            self.vespene -= cost.vespene
+            return None
+        else:
+            return error
+
+    # Execute all orders in self.order_queue and reset it
     async def execute_order_queue(self):
         await self._client.actions(self.order_queue, game_data=self._game_data)
+        self.order_queue = [] # Reset order queue
         
 
     async def train(self, unit_type, building):
@@ -300,3 +328,34 @@ class BaseBot(sc2.BotAI):
             closest_mineral_patch = self.state.mineral_field.closest_to(worker)
             await self.do(worker.gather(closest_mineral_patch))
             #await self.order(worker, HARVEST_GATHER, closest_mineral_patch)
+
+    # Remember enemy units last position, even though they're not seen anymore
+    def remember_enemy_units(self):
+        for unit in self.known_enemy_units.not_structure:
+            self.remembered_enemy_units_by_tag[unit.tag] = unit
+
+            # Hack to delete killed unit. Todo: Find a better way
+            if unit.health < 20:
+                del self.remembered_enemy_units_by_tag[unit.tag]
+
+        self.remembered_enemy_units = sc2.units.Units([], self._game_data)
+        for tag, unit in self.remembered_enemy_units_by_tag.items():
+            self.remembered_enemy_units.append(unit)
+
+    # Remember friendly units previous state, so we can see if they're taking damage
+    def remember_friendly_units(self):
+        for unit in self.units:
+            unit.is_taking_damage = False
+
+            # If we already remember this friendly unit
+            if unit.tag in self.remembered_friendly_units_by_tag:
+                health_old = self.remembered_friendly_units_by_tag[unit.tag].health
+                shield_old = self.remembered_friendly_units_by_tag[unit.tag].shield
+
+                # Compare its health/shield since last step, to find out if it has taken any damage
+                if unit.health < health_old or unit.shield < shield_old:
+                    unit.is_taking_damage = True
+                
+            self.remembered_friendly_units_by_tag[unit.tag] = unit
+
+        

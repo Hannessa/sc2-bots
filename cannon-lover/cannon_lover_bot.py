@@ -18,7 +18,7 @@ class CannonLoverBot(BaseBot):
     cannons_to_pylons_ratio = 2 # How many cannons to build per pylon at cannon_location
     sentry_ratio = 0.15 # Sentry ratio
     stalker_ratio = 0.6 #0.7 # Stalker/Zealot ratio (1 = only stalkers)
-    units_to_ignore = [DRONE, SCV, PROBE, EGG, LARVA, OVERLORD, OVERSEER, OBSERVER, BROODLING, INTERCEPTOR, MEDIVAC]
+    units_to_ignore = [DRONE, SCV, PROBE, EGG, LARVA, OVERLORD, OVERSEER, OBSERVER, BROODLING, INTERCEPTOR, MEDIVAC, CREEPTUMOR]
     army_size_minimum = 10 # Minimum number of army units before attacking.
     enemy_threat_distance = 50 # Enemy min distance from base before going into panic mode.
     max_worker_count = 70 # Max number of workers to build
@@ -30,70 +30,26 @@ class CannonLoverBot(BaseBot):
     enemy_start_location = None
     #attack_target = None
     has_sent_workers = False
-    remembered_enemy_units = []
-    remembered_enemy_units_by_tag = {}
-    remembered_friendly_units_by_tag = {}
+
 
     # This is run each game step
     async def on_step(self, iteration):
-        # On game start
+        # On first game step, run start logic
         if iteration == 0:
-            # Say hello!
-            await self.chat_send("(probe)(pylon)(cannon)(cannon)(gg)")
+            await self.on_game_start()
 
-            # Save start location for later
-            self.start_location = self.units(NEXUS).first.position
-            self.enemy_natural = await self.find_enemy_natural()
-
-            # Perform worker split
-            await self.worker_split()
-
-            # If 4-player map
-            if len(self.enemy_start_locations) > 1:
-                #await self.chat_send("Not a 2-player map, skipping cannon rush")
-                self.strategy = "late_game"
-            else:
-                # We know enemy start location, so store it
-                self.enemy_start_location = self.enemy_start_locations[0]
-
-            #self.last_seen_enemy_units = Units([], self._game_data)
-
-        # TODO: Save all known in self.all_known_enemy_units (including those that are not visible anymore). Compare with self.known_enemy_units and update each frame (replace existing .
-        
-        # Reset order queue
-        self.order_queue = []
-
+        # Remember seen enemy units and previous state of friendly units
         self.remember_enemy_units()
         self.remember_friendly_units()
-        
-        #if self.remembered_enemy_units.exists:
-        #    print(self.remembered_enemy_units[0].tag)
-        #    print(self.remembered_enemy_units[0].position)
 
-
-
-        #if iteration % 100 == 0:
-        #    print ("--------")
-        #    for unit in self.known_enemy_units:
-        #        print(unit.name)
-
-        # Change to "late game" strategy at 3 minutes or if mineral bank is greater than 600 (i.e. we're failing to build cannons)
-        
-
-        #print("--------")
-        # Do basic logic
-        #self.reset_timer()
+        # Basic logic
         await self.find_cannon_location() # Find next build location for cannons (and pylons)
-        #self.reset_timer()
         await self.manage_bases() # Manage bases (train workers etc, but also base defense)
-        #print("manage_bases: %s" % self.get_timer())
-        #self.reset_timer()
         await self.cancel_buildings() # Make sure to cancel buildings under construction that are under attack
-        #self.reset_timer()
 
+        # Change strategy to late game if above 3 minutes or 600 minerals
         if self.strategy == "early_game" and (self.get_game_time() / 60 > 3 or self.minerals > 600):
             self.strategy = "late_game"
-            #await self.chat_send("Changing to late-game strategy")
 
         # Run strategy 
         if self.strategy == "early_game":
@@ -102,18 +58,34 @@ class CannonLoverBot(BaseBot):
             await self.late_game_strategy()
         elif self.strategy == "panic":
             await self.panic_strategy()
-        #self.reset_timer()
         
         # Worker and stalker micro and movement
         await self.move_workers()
-        #print("move_workers: %s" % self.get_timer())
-        #self.reset_timer()
         await self.move_army()
-        #print("move_army: %s" % self.get_timer())
-        #self.reset_timer()
 
+        # Execute queued commands
         await self.execute_order_queue()
-        #await asyncio.sleep(0.02)
+
+    # Only run once at game start
+    async def on_game_start(self):
+    	# Say hello!
+        await self.chat_send("(probe)(pylon)(cannon)(cannon)(gg)")
+
+        # Save base locations for later
+        self.start_location = self.units(NEXUS).first.position
+        self.enemy_natural = await self.find_enemy_natural()
+
+        # Perform worker split
+        await self.worker_split()
+
+        # If 4-player map, skip cannon rush
+        if len(self.enemy_start_locations) > 1:
+            await self.chat_send("Not a 2-player map, skipping cannon rush :(")
+            self.strategy = "late_game"
+        else:
+            # We know enemy start location, so store it
+            self.enemy_start_location = self.enemy_start_locations[0]
+            self.strategy = "late_game"
 
 
     # Find next location for cannons/pylons
@@ -187,19 +159,6 @@ class CannonLoverBot(BaseBot):
                     if len(worker.orders) == 1 and worker.orders[0].ability.id in [ATTACK]:
                         await self.do(worker.gather(self.state.mineral_field.closest_to(nexus)))
 
-        
-            # If we already have a total of 10+ cannons, also build a pylon and cannon at each base
-            """
-            if self.units(PHOTONCANNON).amount > 10:
-                if self.units(PYLON).closer_than(10, nexus).amount < 1:
-                    if self.can_afford(PYLON):
-                        await self.build(PYLON, near=nexus)
-
-                elif self.units(PHOTONCANNON).closer_than(10, nexus).amount < 1:
-                    #self.cannon_location = nexus.position.towards(self.game_info.map_center, 5)
-                    if self.can_afford(PHOTONCANNON):
-                        await self.build(PHOTONCANNON, near=nexus)
-            """
 
             # Panic mode: Change cannon_location to nexus if we see many enemy units nearby
             # TODO: Actually count enemies in early game and detect rush
@@ -212,7 +171,6 @@ class CannonLoverBot(BaseBot):
             elif self.strategy == "panic":
                 self.strategy = "late_game"
 
-            #num_nearby_enemy_structures >= 1 or num_nearby_enemies >= 2 and (
 
     # Chronoboost (CB) management
     async def handle_chronoboost(self, nexus):
@@ -399,28 +357,17 @@ class CannonLoverBot(BaseBot):
                 await self.build(GATEWAY, near=self.get_base_build_location(self.units(NEXUS).first))
 
         else:
-            #print("late_game_strategy 1: %s" % self.get_timer())
-            #self.reset_timer()
-
             # Make sure to always scout with one worker
             await self.scout()
-            #print("late_game_strategy - scout: %s" % self.get_timer())
-            #self.reset_timer()
 
             # Make sure to always train army units from gateways/warpgates
             await self.train_army()
-            #print("late_game_strategy - train_army: %s" % self.get_timer())
-            #self.reset_timer()
 
             # With the remaining money, go for upgrades
             await self.handle_upgrades()
-            #print("late_game_strategy - handle_upgrades: %s" % self.get_timer())
-            #self.reset_timer()
 
             # And keep building cannons :)
             await self.build_cannons()
-            #print("late_game_strategy - build_cannons: %s" % self.get_timer())
-            #self.reset_timer()
 
     async def scout_cheese(self):
         scout = None
@@ -513,13 +460,7 @@ class CannonLoverBot(BaseBot):
                 return
         
 
-        # Rally/warp-in location is pylon closest to enemy
-        #rally_location = self.units(PYLON).ready.closer_than(50, self.units(NEXUS).first).closest_to(self.enemy_start_locations[0])
-        #rally_location = self.units(PYLON).ready.closest_to(self.cannon_location)
         rally_location = self.get_rally_location()
-        # TODO/FIX: Got an error here???
-
-        #rally_location = self.units(NEXUS).closer_than(40, self.units(NEXUS).first).prefer_close_to(self.game_info.map_center).first.position.towards(self.game_info.map_center, 10)
 
         # Train at Gateways
         for gateway in self.units(GATEWAY).ready:
@@ -561,45 +502,6 @@ class CannonLoverBot(BaseBot):
                     else:
                         await self.warp_in(ZEALOT, rally_location, warpgate)
                         return
-
-    # Warp-in a unit at location from warpgate
-    async def warp_in(self, unit, location, warpgate):
-        if isinstance(location, sc2.unit.Unit):
-            location = location.position.to2
-        elif location is not None:
-            location = location.to2
-
-        x = random.randrange(-8,8)
-        y = random.randrange(-8,8)
-
-        placement = sc2.position.Point2((location.x+x,location.y+y))
-
-        #placement = await self.find_placement(unit, location, max_distance=7, placement_step=1) #position.to2
-        #if placement is None:
-        #    placement = await self.find_placement(WARPGATETRAIN_STALKER, self.units(PYLON).random.position.to2, max_distance=7, placement_step=1)
-        
-        #if placement is None:
-        #    print("Can't place")
-        #    return
-
-        action = warpgate.warp_in(unit, placement)
-        error = await self._client.actions(action, game_data=self._game_data)
-
-        if not error:
-            cost = self._game_data.calculate_ability_cost(action.ability)
-            self.minerals -= cost.minerals
-            self.vespene -= cost.vespene
-            return None
-        else:
-            return error
-
-        #try:
-        #    result = await self.do(warpgate.warp_in(unit, placement))
-
-
-        #except: #sc2.data.ActionResult.CantFindPlacementLocation:
-            #print(e)
-        #    print("Can't find location")
 
 
     # Handle upgrades.
@@ -680,9 +582,9 @@ class CannonLoverBot(BaseBot):
             return
 
         if self.strategy == "early_game":
-            # Make cannon builders flee from melee enemies
+            # Make low health cannon builders flee from melee enemies
             for worker in self.workers.closer_than(30, self.cannon_location):
-                if self.known_enemy_units.closer_than(3, worker).not_structure.filter(lambda unit: not unit.is_flying).exists:
+                if worker.shield < 10 and self.known_enemy_units.closer_than(4, worker).not_structure.filter(lambda unit: not unit.is_flying).exists:
                     if not self.has_order(MOVE, worker):
                         # We have nearby enemy. Run home!
                         #await self.do(worker.gather(self.state.mineral_field.closest_to(self.units(NEXUS).first))) #Do mineral walk at home base to escape.
@@ -692,7 +594,6 @@ class CannonLoverBot(BaseBot):
         for worker in self.workers:
             if self.known_enemy_units.structure.ready.filter(lambda unit: unit.type_id in [PHOTONCANNON]).closer_than(9, worker):
                 if not self.has_order(MOVE, worker):
-                    # We have nearby enemy. Run home!
                     await self.do(worker.move(worker.position.towards(self.start_location, 4)))
 
 
@@ -711,7 +612,7 @@ class CannonLoverBot(BaseBot):
             attack_location = self.get_rally_location()
         elif self.known_enemy_units.exists:
             # We have large enough army and have seen an enemy. Attack closest enemy to home
-            attack_location = self.known_enemy_units.closest_to(home_location).position
+            attack_location = self.known_enemy_units.filter(lambda unit: unit.type_id not in self.units_to_ignore).closest_to(home_location).position
         else:
             # We have not seen an enemy
             if random.random() < 0.8:
@@ -748,7 +649,7 @@ class CannonLoverBot(BaseBot):
             # If we don't have any nearby enemies
             if not nearby_enemy_units.exists:
                 # If we don't have an attack order, cast one now
-                if not self.has_order(ATTACK, unit) or (attack_location and not self.has_target(attack_location, unit)):
+                if not self.has_order(ATTACK, unit) or (self.known_enemy_units.exists and not self.has_target(attack_location, unit)):
                     if attack_random_exp:
                         # If we're attacking a random exp, find one now
                         random_exp_location = random.choice(list(self.expansion_locations.keys()))
@@ -765,7 +666,9 @@ class CannonLoverBot(BaseBot):
                 continue # Do no further micro
 
             # Calculate friendly vs enemy army value
-            army_advantage = self.friendly_army_value(unit, 20) - self.enemy_army_value(unit, 20)
+            friendly_army_value = self.friendly_army_value(unit, 20)
+            enemy_army_value = self.enemy_army_value(unit, 30)
+            army_advantage = friendly_army_value - enemy_army_value
             #army_advantage = 0
 
             # If our shield is low, escape a little backwards
@@ -787,11 +690,7 @@ class CannonLoverBot(BaseBot):
 
             # Do we have an army advantage?
             if army_advantage > 0:
-                # We have a larger army. Start focus-firing at closest enemy
-                #if not focus_fire_target:
-                #    focus_fire_target = nearby_enemy_units.closest_to(unit)
-
-                #await self.do(unit.attack(focus_fire_target))
+                # We have a larger army. Engage enemy
                 attack_position = nearby_enemy_units.closest_to(unit).position
 
                 # If not already attacking, attack
@@ -799,8 +698,8 @@ class CannonLoverBot(BaseBot):
                     await self.do(unit.attack(attack_position))
                     #print("Attack army advantage")
                 
-                # Activate guardian shield for sentries
-                if has_guardianshield:
+                # Activate guardian shield for sentries (if enemy army value is big enough)
+                if has_guardianshield and enemy_army_value > 200:
                     await self.order(unit, GUARDIANSHIELD_GUARDIANSHIELD)
             else:
                 # We have a smaller army, so run back home!
@@ -816,14 +715,11 @@ class CannonLoverBot(BaseBot):
 
 
     def get_rally_location(self):
-        #rally_location = self.units(PYLON).ready.closer_than(50, self.units(NEXUS).first).closest_to(self.enemy_start_locations[0])
-        #rally_location = self.units(NEXUS).closer_than(40, self.units(NEXUS).first).prefer_close_to(self.game_info.map_center).first.position.towards(self.game_info.map_center, 10)
         if self.units(PYLON).ready.exists:
             if self.cannon_location:
                 rally_location = self.units(PYLON).ready.closest_to(self.cannon_location).position
             else:
                 rally_location = self.units(PYLON).ready.closest_to(self.game_info.map_center).position
-            #rally_location = self.units(PYLON).ready.closest_to(self.game_info.map_center).position
         else:
             rally_location = self.start_location
         return rally_location
@@ -835,13 +731,17 @@ class CannonLoverBot(BaseBot):
         for unit in self.units.not_structure.filter(lambda unit: unit.type_id not in self.units_to_ignore).closer_than(distance, position):
             value += unit.health + unit.shield
 
+        # Also add nearby cannons as friendly army value
+        for unit in self.units(PHOTONCANNON).closer_than(10, position):
+            value += unit.health # Skip shield, to not overestimate
+
         return value
 
     # Approximate army value by adding unit health+shield
     def enemy_army_value(self, position, distance=20):
         value = 0
 
-        for unit in self.remembered_enemy_units.not_structure.filter(lambda unit: unit.type_id not in self.units_to_ignore).closer_than(distance, position):
+        for unit in self.remembered_enemy_units.ready.not_structure.filter(lambda unit: unit.type_id not in self.units_to_ignore).closer_than(distance, position):
             value += unit.health + unit.shield
 
         return value
@@ -865,30 +765,3 @@ class CannonLoverBot(BaseBot):
     def get_base_build_location(self, base, min_distance=10, max_distance=20):
         return base.position.towards(self.get_game_center_random(), random.randrange(min_distance, max_distance))
 
-    def remember_enemy_units(self):
-        for unit in self.known_enemy_units.not_structure:
-            self.remembered_enemy_units_by_tag[unit.tag] = unit
-
-            if unit.health < 20:
-                del self.remembered_enemy_units_by_tag[unit.tag]
-
-        self.remembered_enemy_units = sc2.units.Units([], self._game_data)
-        for tag, unit in self.remembered_enemy_units_by_tag.items():
-            self.remembered_enemy_units.append(unit)
-
-    def remember_friendly_units(self):
-        for unit in self.units:
-            # If we already remember this friendly unit
-            if unit.tag in self.remembered_friendly_units_by_tag:
-                # Compare its health/shield since last step, to decide if it has taken damage
-                health_old = self.remembered_friendly_units_by_tag[unit.tag].health
-                shield_old = self.remembered_friendly_units_by_tag[unit.tag].shield
-                if unit.health < health_old or unit.shield < shield_old:
-                    unit.is_taking_damage = True
-                else:
-                    unit.is_taking_damage = False
-            else:
-                unit.is_taking_damage = False
-            self.remembered_friendly_units_by_tag[unit.tag] = unit
-
-        

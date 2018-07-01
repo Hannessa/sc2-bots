@@ -1,4 +1,4 @@
-# sc2-bots
+# StarCraft 2 Bots
 Various StarCraft 2 bots coded in Python.
 
 ## Requirements

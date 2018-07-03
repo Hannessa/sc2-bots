@@ -6,40 +6,13 @@ from sc2 import Race, Difficulty
 from sc2.constants import *
 from sc2.player import Bot, Computer
 
-"""
-def calculate_ability_cost(self, ability):
-    if isinstance(ability, AbilityId):
-        ability = self.abilities[ability.value]
-    elif isinstance(ability, UnitCommand):
-        ability = self.abilities[ability.ability.value]
 
-    assert isinstance(ability, AbilityData), f"C: {ability}"
-
-    for unit in self.units.values():
-        if unit.creation_ability == ability:
-            if unit.id == ZERGLING:
-                # HARD CODED: zerglings are generated in pairs
-                return Cost(
-                    unit.cost.minerals * 2,
-                    unit.cost.vespene * 2,
-                    unit.cost.time
-                )
-            return unit.cost
-
-    for upgrade in self.upgrades.values():
-        if upgrade.research_ability == ability:
-            return upgrade.cost
-
-    return Cost(0, 0)
-sc2.game_data.calculate_ability_cost = calculate_ability_cost
-"""
-
-
+# This fix is required for the queued order system to work correctly (self.execute_order_queue())
 import itertools
 FLOAT_DIGITS = 8
 EPSILON = 10**(-FLOAT_DIGITS)
 def eq(self, other):
-    #    assert isinstance(other, tuple)
+    #assert isinstance(other, tuple)
     if not isinstance(other, tuple):
         return False
     return all(abs(a - b) < EPSILON for a, b in itertools.zip_longest(self, other, fillvalue=0))
@@ -329,20 +302,36 @@ class BaseBot(sc2.BotAI):
             await self.do(worker.gather(closest_mineral_patch))
             #await self.order(worker, HARVEST_GATHER, closest_mineral_patch)
 
-    # Remember enemy units last position, even though they're not seen anymore
+
+    # Remember enemy units' last position, even though they're not seen anymore
     def remember_enemy_units(self):
-        for unit in self.known_enemy_units.not_structure:
+        # Every 60 seconds, clear all remembered units (to clear out killed units)
+        #if round(self.get_game_time() % 60) == 0:
+        #    self.remembered_enemy_units_by_tag = {}
+
+        # Look through all currently seen units and add them to list of remembered units (override existing)
+        for unit in self.known_enemy_units:
+            unit.is_known_this_step = True
             self.remembered_enemy_units_by_tag[unit.tag] = unit
 
-            # Hack to delete killed unit. Todo: Find a better way
-            if unit.health < 20:
-                del self.remembered_enemy_units_by_tag[unit.tag]
-
+        # Convert to an sc2 Units object and place it in self.remembered_enemy_units
         self.remembered_enemy_units = sc2.units.Units([], self._game_data)
-        for tag, unit in self.remembered_enemy_units_by_tag.items():
+        for tag, unit in list(self.remembered_enemy_units_by_tag.items()):
+            # Make unit.is_seen = unit.is_visible 
+            if unit.is_known_this_step:
+                unit.is_seen = unit.is_visible # There are known structures that are not visible
+                unit.is_known_this_step = False # Set to false for next step
+            else:
+                unit.is_seen = False
+
+            # Units that are not visible while we friendly units nearby likely don't exist anymore, so delete them
+            if not unit.is_seen and self.units.closer_than(7, unit).exists:
+                del self.remembered_enemy_units_by_tag[unit.tag]
+                continue
+
             self.remembered_enemy_units.append(unit)
 
-    # Remember friendly units previous state, so we can see if they're taking damage
+    # Remember friendly units' previous state, so we can see if they're taking damage
     def remember_friendly_units(self):
         for unit in self.units:
             unit.is_taking_damage = False

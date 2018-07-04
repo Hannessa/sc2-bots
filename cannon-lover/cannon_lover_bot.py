@@ -90,7 +90,7 @@ class CannonLoverBot(BaseBot):
             await self.chat_send("Not a 2-player map, skipping cannon rush :(")
             self.strategy = "late_game"
         else:
-            # We know enemy start location, so store it
+            # 2-player map, so we know enemy start location
             self.enemy_start_location = self.enemy_start_locations[0]
 
         #self.strategy = "late_game" # Force late-game for testing
@@ -318,6 +318,14 @@ class CannonLoverBot(BaseBot):
         prefered_base_count = max(prefered_base_count, 2) # Take natural ASAP (i.e. minimum 2 bases)
         current_base_count = self.units(NEXUS).ready.filter(lambda unit: unit.ideal_harvesters >= 10).amount # Only count bases as active if they have at least 10 ideal harvesters (will decrease as it's mined out)
 
+        # Vespene gases per nexus
+        if self.enemy_start_location:
+            # 2-player map. Just build 1 gas per nexus, as we start with cannon rush so need more minerals.
+            prefered_gas_count = round(1 * self.units(NEXUS).amount)
+        else:
+            # 4-player map. Build 1.5 gas per nexus.
+            prefered_gas_count = round(1.5 * self.units(NEXUS).amount)
+
         # Also add an extra expansion if minerals get too high
         #if self.minerals > 800:
         #    prefered_base_count += 1
@@ -352,7 +360,7 @@ class CannonLoverBot(BaseBot):
                     await self.build(PHOTONCANNON, near=nexus.position.towards(self.game_info.map_center, random.randrange(-10,-1)))
 
         # Take gases (1 per nexus)
-        elif self.units(ASSIMILATOR).amount < round(1.5 * self.units(NEXUS).amount) and not self.already_pending(ASSIMILATOR):
+        elif self.units(ASSIMILATOR).amount < prefered_gas_count and not self.already_pending(ASSIMILATOR):
             if self.can_afford(ASSIMILATOR):
                 for gas in self.state.vespene_geyser.closer_than(20.0, nexus):
                     if not self.units(ASSIMILATOR).closer_than(1.0, gas).exists and self.can_afford(ASSIMILATOR):
@@ -503,7 +511,7 @@ class CannonLoverBot(BaseBot):
                 enemy_units = self.remembered_enemy_units
                 has_mostly_marauders = enemy_units(MARAUDER).amount > 0 and enemy_units(MARAUDER).amount > enemy_units(MARINE).amount
                 has_mostly_mech = enemy_units(HELLION).amount > 0 and enemy_units(HELLION).amount > enemy_units(MARINE).amount
-                has_mostly_stalkers = enemy_units(STALKER).amount > 0 and enemy_units(STALKER).amount > enemy_units(ZEALOT).amount
+                has_mostly_stalkers = enemy_units(STALKER).amount > 0 and enemy_units(STALKER).amount * 1.5 > enemy_units(ZEALOT).amount 
                 has_mostly_roaches = enemy_units(ROACH).amount > 0 and enemy_units(ROACH).amount > enemy_units(HYDRALISK).amount and enemy_units(ROACH).amount * 2 > enemy_units(ZERGLING).amount
                 has_too_many_flying = enemy_units(VIKINGFIGHTER).amount > 3 or enemy_units(MUTALISK).amount > 3 or enemy_units(VOIDRAY).amount > 3 or enemy_units(PHOENIX).amount > 3
 
@@ -768,7 +776,7 @@ class CannonLoverBot(BaseBot):
         # Count nearby bunkers
         for unit in self.units(BUNKER).ready.closer_than(10, position):
             value += unit.health
-        
+
         # Count nearby spine crawlers
         for unit in self.units(SPINECRAWLER).ready.closer_than(10, position):
             value += unit.health
@@ -781,6 +789,10 @@ class CannonLoverBot(BaseBot):
 
         for unit in self.remembered_enemy_units.ready.not_structure.filter(lambda unit: unit.type_id not in self.units_to_ignore).closer_than(distance, position):
             value += unit.health + unit.shield
+
+            # Add extra army value for marine/marauder, to not under-estimate
+            if unit.type_id in [MARINE, MARAUDER]:
+                value += 20
 
         # Count nearby cannons
         for unit in self.remembered_enemy_units(PHOTONCANNON).ready.closer_than(10, position):

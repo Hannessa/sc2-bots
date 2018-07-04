@@ -324,9 +324,9 @@ class BaseBot(sc2.BotAI):
             else:
                 unit.is_seen = False
 
-            # Units that are not visible while we friendly units nearby likely don't exist anymore, so delete them
+            # Units that are not visible while we have friendly units nearby likely don't exist anymore, so delete them
             if not unit.is_seen and self.units.closer_than(7, unit).exists:
-                del self.remembered_enemy_units_by_tag[unit.tag]
+                del self.remembered_enemy_units_by_tag[tag]
                 continue
 
             self.remembered_enemy_units.append(unit)

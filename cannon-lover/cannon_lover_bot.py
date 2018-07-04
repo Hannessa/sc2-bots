@@ -11,16 +11,15 @@ from base_bot import BaseBot
 # TODO: Better micro for first cannon builder
 # TODO: Bug, workers hunt enemies too far out
 # TODO: Better scouting when no enemy units are known (focus on enemy_start_locations)
-# FIX: Only keep building cannons in late_game if already have a forward pylon/cannon
 
 
 class CannonLoverBot(BaseBot):
-    cannon_start_distance = 30 # Distance of first pylon/cannon from enemy base (towards natural expansion)
+    cannon_start_distance = 35 # Distance of first pylon/cannon from enemy base (towards natural expansion)
     cannon_advancement_rate = 6 # Distance units to cover per pylon towards enemy base
     cannons_to_pylons_ratio = 2 # How many cannons to build per pylon at cannon_location
     sentry_ratio = 0.15 # Sentry ratio
     stalker_ratio = 0.6 #0.7 # Stalker/Zealot ratio (1 = only stalkers)
-    units_to_ignore = [DRONE, SCV, PROBE, EGG, LARVA, OVERLORD, OVERSEER, OBSERVER, BROODLING, INTERCEPTOR, MEDIVAC, CREEPTUMOR, REAPER]
+    units_to_ignore = [DRONE, SCV, PROBE, EGG, LARVA, OVERLORD, OVERSEER, OBSERVER, BROODLING, INTERCEPTOR, MEDIVAC, CREEPTUMOR, CREEPTUMORBURROWED, CREEPTUMORQUEEN, CREEPTUMORMISSILE]
     army_size_minimum = 10 # Minimum number of army units before attacking.
     enemy_threat_distance = 50 # Enemy min distance from base before going into panic mode.
     max_worker_count = 70 # Max number of workers to build
@@ -103,7 +102,7 @@ class CannonLoverBot(BaseBot):
             # Stop making cannons after we reached self.max_cannon_count
             self.cannon_location = None
             return
-        elif self.strategy == "late_game" and (not self.enemy_start_location or not self.units(PYLON).closer_than(30, self.enemy_start_location).exists):
+        elif self.strategy == "late_game" and (not self.enemy_start_location or not self.units(PYLON).closer_than(self.cannon_start_distance+5, self.enemy_start_location).exists):
             # Also stop making cannons if we're in late-game and still have no pylon near enemy base
             self.cannon_location = None
             return
@@ -117,7 +116,7 @@ class CannonLoverBot(BaseBot):
             return
 
         # Find a good distance from enemy base (start further out and slowly close in)
-        distance = self.cannon_start_distance-(self.units(PYLON).closer_than(30, target).amount*self.cannon_advancement_rate)
+        distance = self.cannon_start_distance-(self.units(PYLON).closer_than(self.cannon_start_distance+5, target).amount*self.cannon_advancement_rate)
         if distance < 0:
             distance = 0
 
@@ -125,12 +124,6 @@ class CannonLoverBot(BaseBot):
 
 
     async def manage_bases(self):
-        # If no nexus left, send all workers to attack enemy base
-        if not self.units(NEXUS).exists:
-            for worker in self.workers:
-                await self.do(worker.attack(self.enemy_start_locations[0]))
-            return
-
         # Do some logic for each nexus
         for nexus in self.units(NEXUS).ready:
             # Train workers until at nexus max (+4)
@@ -359,7 +352,7 @@ class CannonLoverBot(BaseBot):
                     await self.build(PHOTONCANNON, near=nexus.position.towards(self.game_info.map_center, random.randrange(-10,-1)))
 
         # Take gases (1 per nexus)
-        elif self.units(ASSIMILATOR).amount < 1 * self.units(NEXUS).amount and not self.already_pending(ASSIMILATOR):
+        elif self.units(ASSIMILATOR).amount < round(1.5 * self.units(NEXUS).amount) and not self.already_pending(ASSIMILATOR):
             if self.can_afford(ASSIMILATOR):
                 for gas in self.state.vespene_geyser.closer_than(20.0, nexus):
                     if not self.units(ASSIMILATOR).closer_than(1.0, gas).exists and self.can_afford(ASSIMILATOR):
@@ -407,12 +400,10 @@ class CannonLoverBot(BaseBot):
         # Must have a valid exp location
         location = await self.get_next_expansion()
         if not location:
-            print("Could not find exp location")
             return False
 
         # Must not have enemies nearby
         if self.known_enemy_units.closer_than(10, location).exists:
-            print("Too many enemies nearby to exp")
             return False
 
         # Must be able to find a valid building position
@@ -514,15 +505,16 @@ class CannonLoverBot(BaseBot):
                 has_mostly_mech = enemy_units(HELLION).amount > 0 and enemy_units(HELLION).amount > enemy_units(MARINE).amount
                 has_mostly_stalkers = enemy_units(STALKER).amount > 0 and enemy_units(STALKER).amount > enemy_units(ZEALOT).amount
                 has_mostly_roaches = enemy_units(ROACH).amount > 0 and enemy_units(ROACH).amount > enemy_units(HYDRALISK).amount and enemy_units(ROACH).amount * 2 > enemy_units(ZERGLING).amount
+                has_too_many_flying = enemy_units(VIKINGFIGHTER).amount > 3 or enemy_units(MUTALISK).amount > 3 or enemy_units(VOIDRAY).amount > 3 or enemy_units(PHOENIX).amount > 3
 
                 # Depending on enemy's unit composition, build either immortal or colossus
-                if has_mostly_marauders or has_mostly_mech or has_mostly_stalkers or has_mostly_roaches:
+                if has_mostly_marauders or has_mostly_mech or has_mostly_stalkers or has_mostly_roaches or has_too_many_flying:
                     await self.train(IMMORTAL, robotics)
                 else:
                     await self.train(COLOSSUS, robotics)
 
-            # Don't train anything else until robo units are built
-            return
+                # Don't train anything else until robo units are built
+                return
         
 
         rally_location = self.get_rally_location()
@@ -558,10 +550,9 @@ class CannonLoverBot(BaseBot):
                 # Train 75% Stalkers and 25% Zealots
                 if self.can_afford(STALKER) and self.can_afford(ZEALOT) and self.can_afford(SENTRY):
                     rand = random.random()
-                    if self.minerals > 400 and self.vespene < 100:
+                    if self.minerals > 400 and self.vespene < 100: # 
                         # Always warp in zealots if banking minerals
                         await self.warp_in(ZEALOT, rally_location, warpgate)
-                        return
                     elif rand <= self.sentry_ratio and self.units(CYBERNETICSCORE).ready.exists:
                         await self.warp_in(SENTRY, rally_location, warpgate)
                         return
@@ -764,24 +755,44 @@ class CannonLoverBot(BaseBot):
         return rally_location
 
     # Approximate army value by adding unit health+shield
-    def friendly_army_value(self, position, distance=20):
+    def friendly_army_value(self, position, distance=10):
         value = 0
 
         for unit in self.units.not_structure.filter(lambda unit: unit.type_id not in self.units_to_ignore).closer_than(distance, position):
             value += unit.health + unit.shield
 
-        # Also add nearby cannons as friendly army value
+        # Count nearby cannons
         for unit in self.units(PHOTONCANNON).closer_than(10, position):
             value += unit.health # Skip shield, to not overestimate
+
+        # Count nearby bunkers
+        for unit in self.units(BUNKER).ready.closer_than(10, position):
+            value += unit.health
+        
+        # Count nearby spine crawlers
+        for unit in self.units(SPINECRAWLER).ready.closer_than(10, position):
+            value += unit.health
 
         return value
 
     # Approximate army value by adding unit health+shield
-    def enemy_army_value(self, position, distance=20):
+    def enemy_army_value(self, position, distance=10):
         value = 0
 
         for unit in self.remembered_enemy_units.ready.not_structure.filter(lambda unit: unit.type_id not in self.units_to_ignore).closer_than(distance, position):
             value += unit.health + unit.shield
+
+        # Count nearby cannons
+        for unit in self.remembered_enemy_units(PHOTONCANNON).ready.closer_than(10, position):
+            value += unit.health # Skip shield, to not overestimate
+
+        # Count nearby bunkers
+        for unit in self.remembered_enemy_units(BUNKER).ready.closer_than(10, position):
+            value += unit.health
+
+        # Count nearby spine crawlers
+        for unit in self.remembered_enemy_units(SPINECRAWLER).ready.closer_than(10, position):
+            value += unit.health
 
         return value
 

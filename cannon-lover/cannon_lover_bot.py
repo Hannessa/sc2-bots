@@ -27,16 +27,20 @@ class CannonLoverBot(BaseBot):
     max_cannon_count = 15 # Max number of cannons
     gateways_per_nexus = 2 # Number of gateways per nexus
 
-    strategy = "early_game"
+    strategy = "early_game" # Set to "late_game" to skip cannon rush
     cannon_location = None
     start_location = None
     enemy_start_location = None
     #attack_target = None
     has_sent_workers = False
+    iteration = 0
 
 
     # This is run each game step
     async def on_step(self, iteration):
+        # Store iteration
+        self.iteration = iteration
+
         # On first game step, run start logic
         if iteration == 0:
             await self.on_game_start()
@@ -50,9 +54,9 @@ class CannonLoverBot(BaseBot):
         await self.manage_bases() # Manage bases (train workers etc, but also base defense)
         await self.cancel_buildings() # Make sure to cancel buildings under construction that are under attack
 
-        # Change strategy to late game if above 3 minutes or 600 minerals
-        if self.strategy == "early_game" and (self.get_game_time() / 60 > 3 or self.minerals > 600):
-        	await self.chat_send("Changing to late-game strategy")
+        # Change strategy to late game if above 3 minutes or if banking minerals
+        if self.strategy == "early_game" and (self.get_game_time() / 60 > 3 or self.minerals > 800):
+            await self.chat_send("Changing to late-game strategy")
             self.strategy = "late_game"
 
         # Run strategy 
@@ -89,7 +93,7 @@ class CannonLoverBot(BaseBot):
         else:
             # We know enemy start location, so store it
             self.enemy_start_location = self.enemy_start_locations[0]
-        
+
         #self.strategy = "late_game" # Force late-game for testing
 
 
@@ -99,9 +103,10 @@ class CannonLoverBot(BaseBot):
             # Stop making cannons after we reached self.max_cannon_count
             self.cannon_location = None
             return
-        #if self.strategy == "late_game" and self.known_enemy_units.structure.exists and self.units(NEXUS).exists:
-        #    target = self.known_enemy_units.structure.prefer_close_to(self.units(NEXUS).first).first.position
-        #    approach_from = self.game_info.map_center
+        elif self.strategy == "late_game" and (not self.enemy_start_location or not self.units(PYLON).closer_than(30, self.enemy_start_location).exists):
+            # Also stop making cannons if we're in late-game and still have no pylon near enemy base
+            self.cannon_location = None
+            return
         elif self.enemy_start_location:
             # Only if enemy start location is known
             target = self.enemy_start_location
@@ -306,8 +311,9 @@ class CannonLoverBot(BaseBot):
 
         gateways = self.units(GATEWAY) | self.units(WARPGATE)
 
-        # We might have multiple bases, so distribute workers between them
-        await self.distribute_workers()
+        # We might have multiple bases, so distribute workers between them (not every game step)
+        if self.iteration % 10 == 0:
+            await self.distribute_workers()
 
         # If game time is greater than 2 min, make sure to always scout with one worker
         if self.get_game_time() > 120:
@@ -320,8 +326,8 @@ class CannonLoverBot(BaseBot):
         current_base_count = self.units(NEXUS).ready.filter(lambda unit: unit.ideal_harvesters >= 10).amount # Only count bases as active if they have at least 10 ideal harvesters (will decrease as it's mined out)
 
         # Also add an extra expansion if minerals get too high
-        if self.minerals > 800:
-            prefered_base_count += 1
+        #if self.minerals > 800:
+        #    prefered_base_count += 1
         
         # Make sure we have at least one pylon near nexus before expanding
         if not self.units(PYLON).exists and not self.already_pending(PYLON):
@@ -329,7 +335,7 @@ class CannonLoverBot(BaseBot):
                 await self.build(PYLON, near=nexus)
 
         #print(str(self.units(NEXUS).ready.filter(lambda unit: unit.ideal_harvesters >= 10).amount) + " / " + str(prefered_base_count))
-        elif current_base_count < prefered_base_count and not self.already_pending(NEXUS):
+        elif current_base_count < prefered_base_count and not self.already_pending(NEXUS) and await self.can_take_expansion():
             if self.can_afford(NEXUS):
                 await self.expand_now()
 
@@ -394,9 +400,28 @@ class CannonLoverBot(BaseBot):
             # With the remaining money, go for upgrades
             await self.handle_upgrades()
 
-            # Keep building cannons, but only if we already have a front pylon (otherwise we probably failed the cannon rush!)
-            if self.enemy_start_location and self.units(PYLON).closer_than(40, self.enemy_start_location).exists:
-               await self.build_cannons()
+            # And keep building cannons :)
+            await self.build_cannons()
+
+    async def can_take_expansion(self):
+        # Must have a valid exp location
+        location = await self.get_next_expansion()
+        if not location:
+            print("Could not find exp location")
+            return False
+
+        # Must not have enemies nearby
+        if self.known_enemy_units.closer_than(10, location).exists:
+            print("Too many enemies nearby to exp")
+            return False
+
+        # Must be able to find a valid building position
+        #position = await self.find_placement(NEXUS, location.rounded, max_distance=10, random_alternative=False, placement_step=1)
+        #if not position:
+        #    print("Could not find exp building pos")
+
+        return True
+
 
     async def scout_cheese(self):
         scout = None
@@ -608,37 +633,24 @@ class CannonLoverBot(BaseBot):
                         await self.do(forge(shield_armor_id))
                     return
 
-        # For late game, also build Robotics Facility
-        #if not self.units(ROBOTICSFACILITY).exists and not self.already_pending(ROBOTICSFACILITY):
-        #    if self.can_afford(ROBOTICSFACILITY) and self.units(CYBERNETICSCORE).ready.exists:
-        #        await self.build(ROBOTICSFACILITY, near=self.get_base_build_location(self.units(NEXUS).random))
-        #    return
-
-        # For even later game, also build Robotics Bay
-        #if not self.units(ROBOTICSBAY).exists and not self.already_pending(ROBOTICSBAY):
-        #    if self.can_afford(ROBOTICSBAY) and self.units(ROBOTICSFACILITY).ready.exists:
-        #        await self.build(ROBOTICSBAY, near=self.get_base_build_location(self.units(NEXUS).random))
-        #    return
 
     # Micro for workers
     async def move_workers(self):
-        if not self.cannon_location:
-            return
+        # Make workers flee from enemy cannon
+        for worker in self.workers:
+            if self.known_enemy_units.structure.ready.filter(lambda unit: unit.type_id in [PHOTONCANNON]).closer_than(9, worker):
+                if not self.has_order(MOVE, worker):
+                    await self.do(worker.move(worker.position.towards(self.start_location, 4)))
 
-        if self.enemy_start_location and self.units(PYLON).closer_than(40, self.enemy_start_location).exists:
-            # Make low health cannon builders flee from melee enemies
-            for worker in self.workers.closer_than(30, self.cannon_location):
+        # Make low health cannon builders flee from melee enemies
+        if self.cannon_location:
+            for worker in self.workers.closer_than(40, self.cannon_location):
                 if worker.shield < 10 and self.known_enemy_units.closer_than(4, worker).not_structure.filter(lambda unit: not unit.is_flying).exists:
                     if not self.has_order(MOVE, worker):
                         # We have nearby enemy. Run home!
                         #await self.do(worker.gather(self.state.mineral_field.closest_to(self.units(NEXUS).first))) #Do mineral walk at home base to escape.
                         await self.do(worker.move(worker.position.towards(self.start_location, 4)))
 
-        # Make worker flee from enemy cannon
-        for worker in self.workers:
-            if self.known_enemy_units.structure.ready.filter(lambda unit: unit.type_id in [PHOTONCANNON]).closer_than(9, worker):
-                if not self.has_order(MOVE, worker):
-                    await self.do(worker.move(worker.position.towards(self.start_location, 4)))
 
 
     # Movement and micro for army

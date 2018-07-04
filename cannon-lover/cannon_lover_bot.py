@@ -52,6 +52,7 @@ class CannonLoverBot(BaseBot):
 
         # Change strategy to late game if above 3 minutes or 600 minerals
         if self.strategy == "early_game" and (self.get_game_time() / 60 > 3 or self.minerals > 600):
+        	await self.chat_send("Changing to late-game strategy")
             self.strategy = "late_game"
 
         # Run strategy 
@@ -88,7 +89,8 @@ class CannonLoverBot(BaseBot):
         else:
             # We know enemy start location, so store it
             self.enemy_start_location = self.enemy_start_locations[0]
-            self.strategy = "late_game"
+        
+        #self.strategy = "late_game" # Force late-game for testing
 
 
     # Find next location for cannons/pylons
@@ -97,9 +99,9 @@ class CannonLoverBot(BaseBot):
             # Stop making cannons after we reached self.max_cannon_count
             self.cannon_location = None
             return
-        if self.strategy == "late_game" and self.known_enemy_units.structure.exists and self.units(NEXUS).exists:
-            target = self.known_enemy_units.structure.prefer_close_to(self.units(NEXUS).first).first.position
-            approach_from = self.game_info.map_center
+        #if self.strategy == "late_game" and self.known_enemy_units.structure.exists and self.units(NEXUS).exists:
+        #    target = self.known_enemy_units.structure.prefer_close_to(self.units(NEXUS).first).first.position
+        #    approach_from = self.game_info.map_center
         elif self.enemy_start_location:
             # Only if enemy start location is known
             target = self.enemy_start_location
@@ -166,10 +168,10 @@ class CannonLoverBot(BaseBot):
             # Panic mode: Change cannon_location to nexus if we see many enemy units nearby
             if self.strategy == "early_game":
                 # TODO: Actually count enemies in early game and detect rush
-                num_nearby_enemy_structures = self.known_enemy_units.structure.closer_than(self.enemy_threat_distance, nexus).amount
+                num_nearby_enemy_structures = self.remembered_enemy_units.structure.closer_than(self.enemy_threat_distance, nexus).amount
                 num_nearby_enemy_units = self.remembered_enemy_units.not_structure.closer_than(self.enemy_threat_distance, nexus).amount
                 min_defensive_cannons = num_nearby_enemy_structures + max(num_nearby_enemy_units-1, 0)
-                if num_nearby_enemy_structures > 0 and num_nearby_enemy_units > 2 and self.units(PHOTONCANNON).closer_than(20, nexus).amount < min_defensive_cannons:
+                if (num_nearby_enemy_structures > 0 or num_nearby_enemy_units > 2) and self.units(PHOTONCANNON).closer_than(20, nexus).amount < min_defensive_cannons:
                     self.cannon_location = nexus.position.towards(self.get_game_center_random(), random.randrange(5, 15)) #random.randrange(20, 30)
                     self.strategy = "panic"
                     await self.chat_send("That was scary! I'm going into panic mode...")
@@ -531,7 +533,7 @@ class CannonLoverBot(BaseBot):
                 # Train 75% Stalkers and 25% Zealots
                 if self.can_afford(STALKER) and self.can_afford(ZEALOT) and self.can_afford(SENTRY):
                     rand = random.random()
-                    if self.minerals > 600:
+                    if self.minerals > 400 and self.vespene < 100:
                         # Always warp in zealots if banking minerals
                         await self.warp_in(ZEALOT, rally_location, warpgate)
                         return

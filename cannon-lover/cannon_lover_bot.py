@@ -411,13 +411,14 @@ class CannonLoverBot(BaseBot):
             return False
 
         # Must not have enemies nearby
-        if self.known_enemy_units.closer_than(10, location).exists:
+        if self.remembered_enemy_units.closer_than(10, location).exists:
             return False
 
         # Must be able to find a valid building position
-        #position = await self.find_placement(NEXUS, location.rounded, max_distance=10, random_alternative=False, placement_step=1)
-        #if not position:
-        #    print("Could not find exp building pos")
+        if self.can_afford(NEXUS):
+            position = await self.find_placement(NEXUS, location.rounded, max_distance=10, random_alternative=False, placement_step=1)
+            if not position:
+                return False
 
         return True
 

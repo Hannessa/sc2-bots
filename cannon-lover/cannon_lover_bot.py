@@ -20,7 +20,7 @@ class CannonLoverBot(BaseBot):
     sentry_ratio = 0.15 # Sentry ratio
     stalker_ratio = 0.6 #0.7 # Stalker/Zealot ratio (1 = only stalkers)
     units_to_ignore = [DRONE, SCV, PROBE, EGG, LARVA, OVERLORD, OVERSEER, OBSERVER, BROODLING, INTERCEPTOR, MEDIVAC, CREEPTUMOR, CREEPTUMORBURROWED, CREEPTUMORQUEEN, CREEPTUMORMISSILE]
-    army_size_minimum = 10 # Minimum number of army units before attacking.
+    army_size_minimum = 20 # Minimum number of army units before attacking.
     enemy_threat_distance = 50 # Enemy min distance from base before going into panic mode.
     max_worker_count = 70 # Max number of workers to build
     max_cannon_count = 15 # Max number of cannons
@@ -556,13 +556,13 @@ class CannonLoverBot(BaseBot):
         for warpgate in self.units(WARPGATE).ready:
             # We check for WARPGATETRAIN_ZEALOT to see if warpgate is ready to warp in
             if await self.has_ability(WARPGATETRAIN_ZEALOT, warpgate) and self.supply_used < 198 and self.supply_left >= 2:
-                # Train 75% Stalkers and 25% Zealots
-                if self.can_afford(STALKER) and self.can_afford(ZEALOT) and self.can_afford(SENTRY):
+                # Always warp in zealots if banking minerals
+                if self.minerals > 400 and self.vespene < 100:
+                    await self.warp_in(ZEALOT, rally_location, warpgate)
+                # Otherwise, train units depending on the ratio
+                elif self.can_afford(STALKER) and self.can_afford(ZEALOT) and self.can_afford(SENTRY):
                     rand = random.random()
-                    if self.minerals > 400 and self.vespene < 100: # 
-                        # Always warp in zealots if banking minerals
-                        await self.warp_in(ZEALOT, rally_location, warpgate)
-                    elif rand <= self.sentry_ratio and self.units(CYBERNETICSCORE).ready.exists:
+                    if rand <= self.sentry_ratio and self.units(CYBERNETICSCORE).ready.exists:
                         await self.warp_in(SENTRY, rally_location, warpgate)
                         return
                     elif rand <= self.stalker_ratio and self.units(CYBERNETICSCORE).ready.exists:
